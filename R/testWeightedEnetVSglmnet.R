@@ -10,8 +10,8 @@ X = matrix(runif(Nrow * Ncol), nrow = Nrow)
 
 # # Make X's columns somewhat correlated.
 tmp = matrix(runif(Ncol * Ncol, -1, 1), Ncol)
-# system.time({X = X %*% tmp}); rm(tmp); gc()
-system.time({X = keyALGs::matmul(X, tmp, maxCore = 15) }); rm(tmp); gc()
+system.time({X = X %*% tmp}); rm(tmp); gc()
+# system.time({X = keyALGs::matmul(X, tmp, maxCore = 15) }); rm(tmp); gc()
 
 
 # How many features (columns) are predictors ~ 1%
