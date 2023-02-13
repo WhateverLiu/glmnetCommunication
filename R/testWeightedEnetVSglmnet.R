@@ -1,24 +1,28 @@
 
 
 set.seed(123)
+
+
 Nrow = 1000
 Ncol = 5000
 X = matrix(runif(Nrow * Ncol), nrow = Nrow)
 
 
-# Make X's columns somewhat correlated.
+# # Make X's columns somewhat correlated.
 tmp = matrix(runif(Ncol * Ncol, -1, 1), Ncol)
-system.time({X = X %*% tmp}); rm(tmp); gc()
+# system.time({X = X %*% tmp}); rm(tmp); gc()
+system.time({X = keyALGs::matmul(X, tmp, maxCore = 15) }); rm(tmp); gc()
 
 
-# How many features (columns) are predictors ~ 50
-NeffectiveFeature = max(1L, as.integer(round(Ncol * 0.01)))
+# How many features (columns) are predictors ~ 1%
+r = 0.01 # Larger `r` creates denser problem.
+NeffectiveFeature = max(1L, as.integer(round(Ncol * r)))
 
 
 # Use the selected predictors to construct y.
 predInd = sample(Ncol, NeffectiveFeature)
 randCoef = as.matrix(runif(NeffectiveFeature, -1, 1))
-randNoise = rnorm(Nrow) * 0.001
+randNoise = rnorm(Nrow) * 0.01
 system.time({y = X[, predInd, drop = F] %*% randCoef + randNoise})
 
 
@@ -31,7 +35,7 @@ X = X[-validInd, , drop = F]
 y = y[-validInd]
 
 
-# Standardize data for making easy comparison
+# Standardize data for easier comparison
 X = apply(X, 2, function(x) (x - mean(x)) / sqrt(mean((x - mean(x)) ^ 2)))
 y = (y - mean(y)) / sqrt(mean((y - mean(y)) ^ 2))
 trainW = rep(1, nrow(X))
@@ -43,40 +47,70 @@ yvalid = (yvalid - mean(yvalid)) / sqrt(mean((yvalid - mean(yvalid)) ^ 2))
 validW = rep(1, nrow(Xvalid))
 
 
-Rcpp::sourceCpp("src/trainWeightedEnet006.cpp", verbose = T)
+Rcpp::sourceCpp("src/trainWeightedEnet008.cpp", verbose = T, rebuild = F)
 
 
 lambdaMinRatio = 0.01
 Nlambda = 100
 
 
-cat("My implementation time cost and training RMSE from the last model on LASSO path:\n")
-alpha = 1
-system.time({myRst = testWeightedEnetReturnAll(
+
+
+alpha = 1 # Lower alpha creates denser problem.
+
+
+myTime = system.time({myRst = testWeightedEnetReturnAll(
   X, y, trainW, Xvalid, yvalid, validW,
   alpha = alpha, lambdaMinMaxRatio = lambdaMinRatio, lambdaPathLength = Nlambda,
-  maxIter = 1000, eps = 1e-10,
+  maxIter = 1000, eps = 1e-7,
   lambdaPathStopDeviance = 0.999,
   lambdaPathStopDevianceRelaIncrease = 1e-5)})
-lastMdl = myRst[[length(myRst)]]
-yhat = X %*% lastMdl[-length(lastMdl)] + lastMdl[length(lastMdl)]
-sqrt(mean((yhat - y) ^ 2))
+mineAllModelRmse = unlist(lapply(myRst, function(b)
+{
+  yhat = X %*% b[-length(b)] + b[length(b)]
+  sqrt(mean((yhat - y) ^ 2))
+}))
 
 
 
 
-cat("glmnet time cost and training RMSE of the last model on LASSO path:")
-system.time({glmnetRst = glmnet::glmnet(
+glmnetTime = system.time({glmnetRst = glmnet::glmnet(
   X, y, weights = NULL, family = "gaussian", alpha = alpha,
   type.gaussian = "naive", nlambda = Nlambda, 
   lambda.min.ratio = lambdaMinRatio,
   intercept = T)})
-tmp = predict(glmnetRst, X)
-glmnetRstLastBeta = glmnetRst$beta[, ncol(glmnetRst$beta)]
-names(glmnetRstLastBeta) = NULL
-sqrt(mean((tmp[, ncol(tmp)] - y) ^ 2))
-glmnetRst$npasses
-sum(glmnetRstLastBeta != 0)
+glmnetPreds = predict(glmnetRst, X)
+glmnetAllModelRmse = apply(glmnetPreds, 2, function(x) 
+  sqrt(mean((x - y) ^ 2)))[-1]
+names(glmnetAllModelRmse) = NULL
+
+
+
+
+cat(
+  "My last model rmse =", round(mineAllModelRmse[length(mineAllModelRmse)], 4), ",",
+  "My avg model rmse =", round(mean(mineAllModelRmse), 4), ",",
+  "My time =", myTime[3], "\n",
+  "glmnet last model rmse =", round(glmnetAllModelRmse[length(glmnetAllModelRmse)], 4), ",",
+  "glmnet avg model rmse =", round(mean(glmnetAllModelRmse), 4), ",",
+  "glmnet time =", glmnetTime[3], "\n",
+  "glmnet npass =", glmnetRst$npasses, ",",
+  "glmnet final model N(coef) =", sum(glmnetRst$beta[, ncol(glmnetRst$beta)] != 0), "\n"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
